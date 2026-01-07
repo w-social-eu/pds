@@ -1,0 +1,103 @@
+name: Build Custom PDS
+
+on:
+  push:
+    branches:
+      - main
+  repository_dispatch:
+    types: [atproto-updated]
+  workflow_dispatch:
+    inputs:
+      atproto_ref:
+        description: 'Atproto branch/tag/commit to use'
+        required: false
+        default: 'main'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout PDS repository
+        uses: actions/checkout@v4
+
+      - name: Set atproto ref
+        id: atproto
+        run: |
+          if [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            REF="${{ github.event.client_payload.atproto_sha }}"
+            SHORT="${{ github.event.client_payload.atproto_short_sha }}"
+            echo "ref=$REF" >> $GITHUB_OUTPUT
+            echo "short_sha=$SHORT" >> $GITHUB_OUTPUT
+            echo "triggered_by=atproto commit $SHORT" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            REF="${{ github.event.inputs.atproto_ref }}"
+            echo "ref=$REF" >> $GITHUB_OUTPUT
+            echo "short_sha=$REF" >> $GITHUB_OUTPUT
+            echo "triggered_by=manual ($REF)" >> $GITHUB_OUTPUT
+          else
+            echo "ref=main" >> $GITHUB_OUTPUT
+            echo "short_sha=main" >> $GITHUB_OUTPUT
+            echo "triggered_by=PDS push" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log into registry ${{ env.REGISTRY }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=custom-${{ steps.atproto.outputs.short_sha }}
+            type=sha,format=long
+            type=ref,event=branch
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          file: ./Dockerfile.custom
+          build-args: |
+            ATPROTO_REF=${{ steps.atproto.outputs.ref }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Summary
+        run: |
+          echo "## Custom PDS Build" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** ${{ steps.atproto.outputs.triggered_by }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Atproto ref:** \`${{ steps.atproto.outputs.ref }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker Tags" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Deploy to servers" >> $GITHUB_STEP_SUMMARY
+          echo "Watchtower will auto-pull the new image, or manually:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "ssh root@<pds-server> 'cd /pds && docker-compose pull && docker-compose up -d'" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

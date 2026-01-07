@@ -1,0 +1,61 @@
+# Build stage - compile atproto and PDS from source
+FROM node:20.19-alpine3.22 as build
+
+RUN corepack enable
+RUN apk add --no-cache git go python3 make g++
+
+# Build goat binary
+ENV CGO_ENABLED=0
+ENV GODEBUG="netdns=go"
+WORKDIR /tmp
+RUN git clone https://github.com/bluesky-social/goat.git && cd goat && git checkout v0.1.2 && go build -o /tmp/goat-build .
+
+# Clone and build custom atproto
+ARG ATPROTO_REPO=https://github.com/w-social-eu/w-social-atproto.git
+ARG ATPROTO_REF=main
+WORKDIR /atproto
+RUN git clone --depth 1 --branch ${ATPROTO_REF} ${ATPROTO_REPO} . || \
+    (git clone ${ATPROTO_REPO} . && git checkout ${ATPROTO_REF})
+RUN corepack prepare --activate
+RUN pnpm install --frozen-lockfile
+RUN pnpm build
+
+# Create service directory with local atproto
+WORKDIR /app
+COPY ./service/package.json ./package.json.orig
+
+# Update package.json to use workspace protocol for local atproto
+RUN node -e " \
+  const pkg = require('./package.json.orig'); \
+  const atprotoPkg = require('/atproto/packages/pds/package.json'); \
+  pkg.dependencies['@atproto/pds'] = 'file:/atproto/packages/pds'; \
+  require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2)); \
+  console.log('Using @atproto/pds version:', atprotoPkg.version); \
+"
+
+COPY ./service/index.js ./
+RUN corepack prepare --activate
+RUN pnpm install --production > /dev/null
+
+# Production stage
+FROM node:20.19-alpine3.22
+
+RUN apk add --update dumb-init
+
+ENTRYPOINT ["dumb-init", "--"]
+
+WORKDIR /app
+COPY --from=build /app /app
+COPY --from=build /atproto/packages /atproto/packages
+COPY --from=build /tmp/goat-build /usr/local/bin/goat
+
+EXPOSE 3000
+ENV PDS_PORT=3000
+ENV NODE_ENV=production
+ENV UV_USE_IO_URING=0
+
+CMD ["node", "--enable-source-maps", "index.js"]
+
+LABEL org.opencontainers.image.source=https://github.com/w-social-eu/pds
+LABEL org.opencontainers.image.description="AT Protocol PDS (Custom Build)"
+LABEL org.opencontainers.image.licenses=MIT
