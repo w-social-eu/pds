@@ -1,5 +1,5 @@
 # Build stage - compile atproto and PDS from source
-FROM node:20.19-alpine3.22 as build
+FROM node:20.19-alpine3.22 AS build
 
 RUN corepack enable
 RUN apk add --no-cache git go python3 make g++
@@ -20,20 +20,18 @@ RUN corepack prepare --activate
 RUN pnpm install --frozen-lockfile
 RUN pnpm build
 
-# Create service directory with local atproto
+# Pack the PDS package for installation
+WORKDIR /atproto/packages/pds
+RUN pnpm pack --pack-destination /tmp/
+
+# Create service directory and install from local package
 WORKDIR /app
-COPY ./service/package.json ./package.json.orig
-
-# Update package.json to use workspace protocol for local atproto
-RUN node -e " \
-  const pkg = require('./package.json.orig'); \
-  const atprotoPkg = require('/atproto/packages/pds/package.json'); \
-  pkg.dependencies['@atproto/pds'] = 'file:/atproto/packages/pds'; \
-  require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2)); \
-  console.log('Using @atproto/pds version:', atprotoPkg.version); \
-"
-
 COPY ./service/index.js ./
+
+# Create package.json that uses the local atproto/pds tarball
+RUN PDS_VERSION=$(ls /tmp/atproto-pds-*.tgz | head -1) && \
+    echo "{\"name\":\"pds\",\"private\":true,\"version\":\"0.0.0\",\"main\":\"index.js\",\"license\":\"MIT\",\"packageManager\":\"pnpm@8.15.9\",\"dependencies\":{\"@atproto/pds\":\"file:${PDS_VERSION}\"}}" > package.json
+
 RUN corepack prepare --activate
 RUN pnpm install --production > /dev/null
 
@@ -46,7 +44,6 @@ ENTRYPOINT ["dumb-init", "--"]
 
 WORKDIR /app
 COPY --from=build /app /app
-COPY --from=build /atproto/packages /atproto/packages
 COPY --from=build /tmp/goat-build /usr/local/bin/goat
 
 EXPOSE 3000
