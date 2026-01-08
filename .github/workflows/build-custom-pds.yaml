@@ -99,5 +99,5 @@ jobs:
           echo "### Deploy to servers" >> $GITHUB_STEP_SUMMARY
           echo "Watchtower will auto-pull the new image, or manually:" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "ssh root@<pds-server> 'cd /pds && docker-compose pull && docker-compose up -d'" >> $GITHUB_STEP_SUMMARY
+          echo "ssh root@<pds-server> 'cd /pds && docker compose pull && docker compose up --build -d'" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
