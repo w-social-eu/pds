@@ -89,11 +89,19 @@ jobs:
           host: ${{ secrets.PDS_HOST }}
           username: root
           key: ${{ secrets.PDS_SSH_KEY }}
+          debug: true
           script: |
             cd /pds
             docker compose pull
             docker compose up -d
-      
+      - name: Debug SSH key
+        run: |
+          echo "Key length: ${#KEY}"
+          echo "First 30 chars: ${KEY:0:30}"
+          echo "Last 10 chars: ${KEY: -10}"
+        env:
+          KEY: ${{ secrets.PDS_SSH_KEY }}
+    
       - name: Build Summary
         run: |
           echo "## Custom PDS Build" >> $GITHUB_STEP_SUMMARY
