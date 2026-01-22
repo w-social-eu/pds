@@ -83,7 +83,21 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Deploy to PDS server
+      - name: Trigger Nomad deployment
+        if: success()
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.INFRASTRUCTURE_DISPATCH_TOKEN }}
+          repository: w-social-eu/w-social-infrastructure
+          event-type: pds-deploy-prod
+          client-payload: |
+            {
+              "image_tag": "custom-${{ steps.atproto.outputs.short_sha }}",
+              "sha": "${{ github.sha }}",
+              "triggered_by": "${{ github.actor }}"
+            }
+
+      - name: Deploy to PDS server (legacy)
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.PDS_HOST }}
