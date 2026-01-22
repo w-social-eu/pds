@@ -4,14 +4,30 @@ on:
   push:
     branches:
       - main
+      - develop
+    tags:
+      - 'v*.*.*'
   repository_dispatch:
     types: [atproto-updated]
   workflow_dispatch:
     inputs:
       atproto_ref:
-        description: 'Atproto branch/tag/commit to use'
+        description: 'Atproto branch/tag/commit to use (fallback if no tarball)'
         required: false
         default: 'main'
+      tarball_url:
+        description: 'Pre-built tarball URL (optional, speeds up build)'
+        required: false
+        default: ''
+      environment:
+        description: 'Target environment'
+        required: false
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - stage
+          - prod
 
 env:
   REGISTRY: ghcr.io
@@ -28,25 +44,62 @@ jobs:
       - name: Checkout PDS repository
         uses: actions/checkout@v4
 
-      - name: Set atproto ref
-        id: atproto
+      - name: Determine environment and refs
+        id: config
         run: |
+          # Determine environment based on branch/tag
           if [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            # Triggered by atproto - use provided info
             REF="${{ github.event.client_payload.atproto_sha }}"
             SHORT="${{ github.event.client_payload.atproto_short_sha }}"
-            echo "ref=$REF" >> $GITHUB_OUTPUT
-            echo "short_sha=$SHORT" >> $GITHUB_OUTPUT
+            TARBALL="${{ github.event.client_payload.tarball_url }}"
+            # Default to stage for atproto triggers (can be customized)
+            ENV="stage"
             echo "triggered_by=atproto commit $SHORT" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             REF="${{ github.event.inputs.atproto_ref }}"
-            echo "ref=$REF" >> $GITHUB_OUTPUT
-            echo "short_sha=$REF" >> $GITHUB_OUTPUT
+            SHORT="${{ github.event.inputs.atproto_ref }}"
+            TARBALL="${{ github.event.inputs.tarball_url }}"
+            ENV="${{ github.event.inputs.environment }}"
             echo "triggered_by=manual ($REF)" >> $GITHUB_OUTPUT
           else
-            echo "ref=main" >> $GITHUB_OUTPUT
-            echo "short_sha=main" >> $GITHUB_OUTPUT
-            echo "triggered_by=PDS push" >> $GITHUB_OUTPUT
+            # Push trigger - determine env from branch/tag
+            REF="main"
+            SHORT="${GITHUB_SHA::7}"
+            TARBALL=""
+
+            if [[ "${{ github.ref_type }}" == "tag" ]]; then
+              # Tag push (v*.*.*) -> production
+              ENV="prod"
+              echo "triggered_by=tag ${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            elif [[ "${{ github.ref_name }}" == "main" ]]; then
+              # main branch -> stage
+              ENV="stage"
+              echo "triggered_by=main branch push" >> $GITHUB_OUTPUT
+            elif [[ "${{ github.ref_name }}" == "develop" ]]; then
+              # develop branch -> dev
+              ENV="dev"
+              echo "triggered_by=develop branch push" >> $GITHUB_OUTPUT
+            else
+              ENV="dev"
+              echo "triggered_by=branch ${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            fi
           fi
+
+          echo "ref=$REF" >> $GITHUB_OUTPUT
+          echo "short_sha=$SHORT" >> $GITHUB_OUTPUT
+          echo "tarball_url=$TARBALL" >> $GITHUB_OUTPUT
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+
+          # Map environment to dispatch event type
+          case "$ENV" in
+            dev)   echo "dispatch_event=pds-deploy-dev" >> $GITHUB_OUTPUT ;;
+            stage) echo "dispatch_event=pds-deploy-stage" >> $GITHUB_OUTPUT ;;
+            prod)  echo "dispatch_event=pds-deploy-prod" >> $GITHUB_OUTPUT ;;
+          esac
+
+          echo "Environment: $ENV"
+          echo "Tarball URL: ${TARBALL:-'(none, will build from source)'}"
 
       - name: Setup Docker buildx
         uses: docker/setup-buildx-action@v3
@@ -64,10 +117,12 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
-            type=raw,value=custom-${{ steps.atproto.outputs.short_sha }}
+            type=raw,value=latest,enable=${{ github.ref_name == 'main' }}
+            type=raw,value=${{ steps.config.outputs.environment }}-latest
+            type=raw,value=custom-${{ steps.config.outputs.short_sha }}
             type=sha,format=long
             type=ref,event=branch
+            type=ref,event=tag
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -77,7 +132,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           file: ./Dockerfile.custom
           build-args: |
-            ATPROTO_REF=${{ steps.atproto.outputs.ref }}
+            PDS_TARBALL_URL=${{ steps.config.outputs.tarball_url }}
+            ATPROTO_REF=${{ steps.config.outputs.ref }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -89,48 +145,34 @@ jobs:
         with:
           token: ${{ secrets.INFRASTRUCTURE_DISPATCH_TOKEN }}
           repository: w-social-eu/w-social-infrastructure
-          event-type: pds-deploy-prod
+          event-type: ${{ steps.config.outputs.dispatch_event }}
           client-payload: |
             {
-              "image_tag": "custom-${{ steps.atproto.outputs.short_sha }}",
+              "image_tag": "custom-${{ steps.config.outputs.short_sha }}",
+              "environment": "${{ steps.config.outputs.environment }}",
               "sha": "${{ github.sha }}",
-              "triggered_by": "${{ github.actor }}"
+              "triggered_by": "${{ github.actor }}",
+              "ref": "${{ github.ref_name }}"
             }
 
-      - name: Deploy to PDS server (legacy)
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.PDS_HOST }}
-          username: root
-          key: ${{ secrets.PDS_SSH_KEY }}
-          debug: true
-          script: |
-            cd /pds
-            docker compose pull
-            docker compose up -d
-      - name: Debug SSH key
-        run: |
-          echo "Key length: ${#KEY}"
-          echo "First 30 chars: ${KEY:0:30}"
-          echo "Last 10 chars: ${KEY: -10}"
-        env:
-          KEY: ${{ secrets.PDS_SSH_KEY }}
-    
       - name: Build Summary
         run: |
           echo "## Custom PDS Build" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Triggered by:** ${{ steps.atproto.outputs.triggered_by }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Atproto ref:** \`${{ steps.atproto.outputs.ref }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Triggered by | ${{ steps.config.outputs.triggered_by }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | **${{ steps.config.outputs.environment }}** |" >> $GITHUB_STEP_SUMMARY
+          echo "| Atproto ref | \`${{ steps.config.outputs.ref }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image tag | \`custom-${{ steps.config.outputs.short_sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tarball | ${{ steps.config.outputs.tarball_url || '(built from source)' }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker Tags" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Deploy to servers" >> $GITHUB_STEP_SUMMARY
-          echo "Watchtower will auto-pull the new image, or manually:" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "ssh root@<pds-server> 'cd /pds && docker compose pull && docker compose up --build -d'" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "### Nomad Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "Triggered: \`${{ steps.config.outputs.dispatch_event }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[View deployment](https://github.com/w-social-eu/w-social-infrastructure/actions)" >> $GITHUB_STEP_SUMMARY
