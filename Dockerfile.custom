@@ -1,8 +1,10 @@
-# Build stage - compile atproto and PDS from source
+# Optimized PDS build - uses pre-built atproto tarball
+# Build time: ~2-3 minutes (vs 50 minutes when building from source)
+
 FROM node:20.19-alpine3.22 AS build
 
 RUN corepack enable
-RUN apk add --no-cache git go python3 make g++
+RUN apk add --no-cache git go wget
 
 # Build goat binary
 ENV CGO_ENABLED=0
@@ -10,27 +12,28 @@ ENV GODEBUG="netdns=go"
 WORKDIR /tmp
 RUN git clone https://github.com/bluesky-social/goat.git && cd goat && git checkout v0.1.2 && go build -o /tmp/goat-build .
 
-# Clone and build custom atproto
-ARG ATPROTO_REPO=https://github.com/w-social-eu/w-social-atproto.git
+# Download pre-built atproto PDS tarball
+ARG PDS_TARBALL_URL
 ARG ATPROTO_REF=main
-WORKDIR /atproto
-RUN git clone --depth 1 --branch ${ATPROTO_REF} ${ATPROTO_REPO} . || \
-    (git clone ${ATPROTO_REPO} . && git checkout ${ATPROTO_REF})
-RUN corepack prepare --activate
-RUN pnpm install --frozen-lockfile
-RUN pnpm build
-
-# Pack the PDS package for installation
-WORKDIR /atproto/packages/pds
-RUN pnpm pack --pack-destination /tmp/
-
-# Create service directory and install from local package
 WORKDIR /app
 COPY ./service/index.js ./
 
-# Create package.json that uses the local atproto/pds tarball
-RUN PDS_VERSION=$(ls /tmp/atproto-pds-*.tgz | head -1) && \
-    echo "{\"name\":\"pds\",\"private\":true,\"version\":\"0.0.0\",\"main\":\"index.js\",\"license\":\"MIT\",\"packageManager\":\"pnpm@8.15.9\",\"dependencies\":{\"@atproto/pds\":\"file:${PDS_VERSION}\"}}" > package.json
+# If tarball URL provided, use it; otherwise fall back to building from source
+RUN if [ -n "$PDS_TARBALL_URL" ]; then \
+      echo "Downloading pre-built tarball from: $PDS_TARBALL_URL" && \
+      wget -O /tmp/atproto-pds.tgz "$PDS_TARBALL_URL" && \
+      echo '{"name":"pds","private":true,"version":"0.0.0","main":"index.js","license":"MIT","packageManager":"pnpm@8.15.9","dependencies":{"@atproto/pds":"file:/tmp/atproto-pds.tgz"}}' > package.json; \
+    else \
+      echo "No tarball URL provided, building from source..." && \
+      apk add --no-cache python3 make g++ && \
+      git clone --depth 1 --branch ${ATPROTO_REF} https://github.com/w-social-eu/w-social-atproto.git /atproto || \
+        (git clone https://github.com/w-social-eu/w-social-atproto.git /atproto && cd /atproto && git checkout ${ATPROTO_REF}) && \
+      cd /atproto && corepack prepare --activate && pnpm install --frozen-lockfile && pnpm build && \
+      cd /atproto/packages/pds && pnpm pack --pack-destination /tmp/ && \
+      cd /app && \
+      PDS_VERSION=$(ls /tmp/atproto-pds-*.tgz | head -1) && \
+      echo "{\"name\":\"pds\",\"private\":true,\"version\":\"0.0.0\",\"main\":\"index.js\",\"license\":\"MIT\",\"packageManager\":\"pnpm@8.15.9\",\"dependencies\":{\"@atproto/pds\":\"file:${PDS_VERSION}\"}}" > package.json; \
+    fi
 
 RUN corepack prepare --activate
 RUN pnpm install --production > /dev/null
