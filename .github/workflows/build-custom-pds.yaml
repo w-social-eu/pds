@@ -189,3 +189,9 @@ jobs:
           echo "Triggered: \`${{ steps.config.outputs.dispatch_event }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "[View deployment](https://github.com/w-social-eu/w-social-infrastructure/actions)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Deploy to servers (manual)" >> $GITHUB_STEP_SUMMARY
+          echo "Watchtower will auto-pull the new image, or manually:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "ssh root@<pds-server> 'cd /pds && docker compose pull && docker compose up --build -d'" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
