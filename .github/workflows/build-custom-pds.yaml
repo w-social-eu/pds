@@ -128,7 +128,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable=${{ github.ref_name == 'main' }}
             type=raw,value=${{ steps.config.outputs.environment }}-latest
-            type=raw,value=custom-${{ steps.config.outputs.short_sha }}
+            type=raw,value=custom-${{ steps.config.outputs.environment }}-${{ steps.config.outputs.short_sha }}
             type=sha,format=long
             type=ref,event=branch
             type=ref,event=tag
@@ -157,7 +157,7 @@ jobs:
           event-type: ${{ steps.config.outputs.dispatch_event }}
           client-payload: |
             {
-              "image_tag": "custom-${{ steps.config.outputs.short_sha }}",
+              "image_tag": "custom-${{ steps.config.outputs.environment }}-${{ steps.config.outputs.short_sha }}",
               "environment": "${{ steps.config.outputs.environment }}",
               "sha": "${{ github.sha }}",
               "triggered_by": "${{ github.actor }}",
@@ -186,7 +186,7 @@ jobs:
           echo "| Triggered by | ${{ steps.config.outputs.triggered_by }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Environment | **${{ steps.config.outputs.environment }}** |" >> $GITHUB_STEP_SUMMARY
           echo "| Atproto ref | \`${{ steps.config.outputs.ref }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Image tag | \`custom-${{ steps.config.outputs.short_sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image tag | \`custom-${{ steps.config.outputs.environment }}-${{ steps.config.outputs.short_sha }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Tarball | ${{ steps.config.outputs.tarball_url || '(built from source)' }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker Tags" >> $GITHUB_STEP_SUMMARY
