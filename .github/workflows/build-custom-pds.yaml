@@ -156,7 +156,7 @@ jobs:
             }
 
       - name: Deploy to PDS server (legacy)
-        if: success() && secrets.PDS_HOST != ''
+        if: success()
         continue-on-error: true
         uses: appleboy/ssh-action@v1
         with:
