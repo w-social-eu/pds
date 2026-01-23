@@ -8,7 +8,7 @@ on:
     tags:
       - 'v*.*.*'
   repository_dispatch:
-    types: [atproto-updated]
+    types: [atproto-updated, atproto-updated-dev, atproto-updated-stage, atproto-updated-prod]
   workflow_dispatch:
     inputs:
       atproto_ref:
@@ -53,9 +53,18 @@ jobs:
             REF="${{ github.event.client_payload.atproto_sha }}"
             SHORT="${{ github.event.client_payload.atproto_short_sha }}"
             TARBALL="${{ github.event.client_payload.tarball_url }}"
-            # Default to stage for atproto triggers (can be customized)
-            ENV="stage"
-            echo "triggered_by=atproto commit $SHORT" >> $GITHUB_OUTPUT
+            # Use environment from payload, or extract from event type, or default to stage
+            ENV="${{ github.event.client_payload.environment }}"
+            if [ -z "$ENV" ]; then
+              # Extract from event type (atproto-updated-dev -> dev)
+              case "${{ github.event.action }}" in
+                atproto-updated-dev)   ENV="dev" ;;
+                atproto-updated-stage) ENV="stage" ;;
+                atproto-updated-prod)  ENV="prod" ;;
+                *)                     ENV="stage" ;;
+              esac
+            fi
+            echo "triggered_by=atproto commit $SHORT ($ENV)" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             REF="${{ github.event.inputs.atproto_ref }}"
             SHORT="${{ github.event.inputs.atproto_ref }}"
