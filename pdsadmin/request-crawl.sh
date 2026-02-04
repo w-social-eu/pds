@@ -6,6 +6,14 @@ set -o pipefail
 PDS_ENV_FILE=${PDS_ENV_FILE:-"/pds/pds.env"}
 source "${PDS_ENV_FILE}"
 
+# Check if we should skip crawl requests (only allow in production and staging)
+PDS_ENVIRONMENT="${PDS_ENVIRONMENT:-production}"
+if [[ "${PDS_ENVIRONMENT}" != "production" && "${PDS_ENVIRONMENT}" != "staging" ]]; then
+  echo "Skipping crawl request: PDS_ENVIRONMENT is '${PDS_ENVIRONMENT}' (not production or staging)"
+  echo "This prevents sending dev data to production Bluesky servers."
+  exit 0
+fi
+
 RELAY_HOSTS="${1:-}"
 if [[ "${RELAY_HOSTS}" == "" ]]; then
   RELAY_HOSTS="${PDS_CRAWLERS}"
