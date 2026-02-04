@@ -164,19 +164,6 @@ jobs:
               "ref": "${{ github.ref_name }}"
             }
 
-      - name: Deploy to PDS server (legacy)
-        if: success()
-        continue-on-error: true
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.PDS_HOST }}
-          username: root
-          key: ${{ secrets.PDS_SSH_KEY }}
-          script: |
-            cd /pds
-            docker compose pull
-            docker compose up -d
-
       - name: Build Summary
         run: |
           echo "## Custom PDS Build" >> $GITHUB_STEP_SUMMARY
