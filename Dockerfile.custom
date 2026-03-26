@@ -18,9 +18,9 @@ ARG ATPROTO_REF=main
 WORKDIR /app
 COPY ./service/index.js ./
 
-COPY ./atproto-xrpc-server.tgz /tmp/atproto-xrpc-server.tgz
-# Copy local tarball if present (ignored if not in build context)
-COPY atproto-pds.tg[z] /tmp/atproto-pds.tgz
+# Copy local tarballs if present (glob trick makes them optional)
+COPY atproto-xrpc-server.tg[z] /tmp/
+COPY atproto-pds.tg[z] /tmp/
 
 RUN if [ -f /tmp/atproto-pds.tgz ]; then \
   echo "Using local tarball from build context" && \
