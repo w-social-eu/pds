@@ -17,6 +17,7 @@ ARG PDS_TARBALL_URL
 ARG ATPROTO_REF=main
 WORKDIR /app
 COPY ./service/index.js ./
+COPY ./atproto-xrpc-server.tgz /tmp/atproto-xrpc-server.tgz
 
 # If tarball URL provided, use it; otherwise fall back to building from source
 RUN if [ -n "$PDS_TARBALL_URL" ]; then \
@@ -38,6 +39,18 @@ RUN echo "Tarball URL: $PDS_TARBALL_URL"
 
 RUN corepack prepare --activate
 RUN pnpm install --production > /dev/null
+
+# Override xrpc-server with custom build (if tarball exists)
+RUN if [ -f /tmp/atproto-xrpc-server.tgz ]; then \
+  echo "Installing custom @atproto/xrpc-server..." && \
+  XRPC_DIR=$(find node_modules -path '*/@atproto/xrpc-server/dist' -type d | head -1 | sed 's|/dist||') && \
+  if [ -n "$XRPC_DIR" ]; then \
+    tar xzf /tmp/atproto-xrpc-server.tgz --strip-components=1 -C "$XRPC_DIR" && \
+    echo "xrpc-server overridden at $XRPC_DIR"; \
+  else \
+    echo "WARNING: could not find xrpc-server in node_modules"; \
+  fi; \
+  fi
 
 # Production stage
 FROM node:20.19-alpine3.22
