@@ -45,15 +45,19 @@ RUN corepack prepare --activate
 RUN pnpm install --production > /dev/null
 
 # Override xrpc-server with custom build (if tarball exists)
+# pnpm stores packages in node_modules/.pnpm/<name>@<version>/node_modules/<name>/
 RUN if [ -f /tmp/atproto-xrpc-server.tgz ]; then \
   echo "Installing custom @atproto/xrpc-server..." && \
-  XRPC_DIR=$(find node_modules -path '*/@atproto/xrpc-server/dist' -type d | head -1 | sed 's|/dist||') && \
-  if [ -n "$XRPC_DIR" ]; then \
-  tar xzf /tmp/atproto-xrpc-server.tgz --strip-components=1 -C "$XRPC_DIR" && \
-  echo "xrpc-server overridden at $XRPC_DIR"; \
-  else \
-  echo "WARNING: could not find xrpc-server in node_modules"; \
-  fi; \
+  echo "Searching for xrpc-server locations..." && \
+  find node_modules -path '*/@atproto/xrpc-server/package.json' -type f | while read pkg; do \
+    XRPC_DIR=$(dirname "$pkg") && \
+    echo "Overriding at: $XRPC_DIR" && \
+    tar xzf /tmp/atproto-xrpc-server.tgz --strip-components=1 -C "$XRPC_DIR" && \
+    echo "  -> done"; \
+  done && \
+  echo "Verifying fix:" && \
+  grep -r "double-encoded" node_modules/.pnpm/*/node_modules/@atproto/xrpc-server/dist/util.js && \
+  echo "xrpc-server override complete"; \
   fi
 
 # Production stage
