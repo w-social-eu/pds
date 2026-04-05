@@ -100,13 +100,6 @@ jobs:
           echo "tarball_url=$TARBALL" >> $GITHUB_OUTPUT
           echo "environment=$ENV" >> $GITHUB_OUTPUT
 
-          # Map environment to dispatch event type
-          case "$ENV" in
-            dev)   echo "dispatch_event=pds-deploy-dev" >> $GITHUB_OUTPUT ;;
-            stage) echo "dispatch_event=pds-deploy-stage" >> $GITHUB_OUTPUT ;;
-            prod)  echo "dispatch_event=pds-deploy-prod" >> $GITHUB_OUTPUT ;;
-          esac
-
           echo "Environment: $ENV"
           echo "Tarball URL: ${TARBALL:-'(none, will build from source)'}"
 
@@ -148,22 +141,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Trigger Nomad deployment
-        if: success()
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.INFRASTRUCTURE_DISPATCH_TOKEN }}
-          repository: w-social-eu/w-social-infrastructure
-          event-type: ${{ steps.config.outputs.dispatch_event }}
-          client-payload: |
-            {
-              "image_tag": "custom-${{ steps.config.outputs.environment }}-${{ steps.config.outputs.short_sha }}",
-              "environment": "${{ steps.config.outputs.environment }}",
-              "sha": "${{ github.sha }}",
-              "triggered_by": "${{ github.actor }}",
-              "ref": "${{ github.ref_name }}"
-            }
-
       - name: Build Summary
         run: |
           echo "## Custom PDS Build" >> $GITHUB_STEP_SUMMARY
@@ -179,15 +156,4 @@ jobs:
           echo "### Docker Tags" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Nomad Deployment" >> $GITHUB_STEP_SUMMARY
-          echo "Triggered: \`${{ steps.config.outputs.dispatch_event }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "[View deployment](https://github.com/w-social-eu/w-social-infrastructure/actions)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Deploy to servers (manual)" >> $GITHUB_STEP_SUMMARY
-          echo "Watchtower will auto-pull the new image, or manually:" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "ssh root@<pds-server> 'cd /pds && docker compose pull && docker compose up --build -d'" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
